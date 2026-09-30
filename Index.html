@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NumisIndia Coin Cropper</title>
+<style>
+:root{--bg:#faf8f4;--fg:#1c1a17;--card:#fff;--line:#d9d3c7;--acc:#a9791c;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15130f;--fg:#f1ece2;--card:#1f1c17;--line:#3a352b;--acc:#d9a441}}
+:root[data-theme="dark"]{--bg:#15130f;--fg:#f1ece2;--card:#1f1c17;--line:#3a352b;--acc:#d9a441}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,Roboto,sans-serif;padding:14px;max-width:640px;margin:0 auto}
+h1{font-size:20px;margin:0}h2{font-size:16px;margin:0 0 6px}
+.s{font-size:13px;opacity:.75}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0}
+canvas{max-width:100%;height:auto;display:block;margin:0 auto}
+label{display:block;font-size:13px;margin-top:8px}
+input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-size:16px}
+input[type=range]{padding:0;border:0}
+button{width:100%;padding:12px;border:0;border-radius:10px;background:var(--acc);color:#fff;font-size:16px;font-weight:600;margin-top:10px}
+button.g{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+.bar{display:flex;justify-content:space-between;align-items:center}
+.bar button{width:auto;padding:6px 12px;margin:0}
+.chk{background:conic-gradient(#ccc 25%,#fff 0 50%,#ccc 0 75%,#fff 0) 0 0/16px 16px;border-radius:8px;padding:6px}
+code{display:block;word-break:break-all;font-size:12px;padding:8px;border:1px dashed var(--line);border-radius:8px;margin-top:8px}
+.hide{display:none}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login" class="card">
+  <h1>NumisIndia Coin Cropper</h1>
+  <p class="s">Please sign in</p>
+  <label>Login ID<input id="lid" autocapitalize="none" autocomplete="username"></label>
+  <label>Password<input id="lpw" type="password" autocomplete="current-password"></label>
+  <button id="lgo">Sign in</button>
+  <p id="lerr" class="s" style="color:#c0392b"></p>
+</div>
+
+<!-- APP -->
+<div id="app" class="hide">
+  <div class="bar"><h1>Coin Cropper</h1><button class="g" id="lout">Logout</button></div>
+  <p class="s" id="who"></p>
+
+  <div class="card hide" id="admin">
+    <h2>Admin: create client login</h2>
+    <label>Client ID<input id="cid" autocapitalize="none"></label>
+    <label>Client password<input id="cpw"></label>
+    <label>Valid until (optional)<input id="cexp" type="date"></label>
+    <button id="cgen">Generate</button>
+    <code id="cout" class="hide"></code>
+    <p class="s">Paste the generated line inside the CLIENTS list in index.html, then redeploy on Netlify.</p>
+  </div>
+
+  <div class="card">
+    <label>Background
+      <select id="bg"><option value="transparent">Transparent</option><option value="#ffffff">White</option><option value="#000000">Black</option></select>
+    </label>
+    <label>Photos (select one or many)<input type="file" id="f" accept="image/*" multiple></label>
+  </div>
+
+  <div id="list"></div>
+
+  <div class="card hide" id="acts">
+    <h2>Download</h2>
+    <button id="dsep">Download each separately</button>
+    <button class="g" id="dzip">Download all as ZIP</button>
+    <label>Merge layout
+      <select id="lay"><option value="row">Side by side (row)</option><option value="col">Stacked (column)</option><option value="grid">Grid (2 columns)</option></select>
+    </label>
+    <label>Gap between coins (px)<input id="gap" type="number" value="40" min="0"></label>
+    <button id="dmerge">Merge &amp; download</button>
+    <div class="chk hide" id="mwrap" style="margin-top:10px"><img id="mprev" style="max-width:100%;display:block;margin:0 auto"></div>
+    <p class="s" id="msg"></p>
+  </div>
+</div>
+
+<script>
+/* ---------- CONFIG: edit credentials here ----------
+   Hash = SHA-256 of  "numisindia-v1" + id(lowercase) + ":" + password
+   Admin  -> id: admin
+   Client -> id: bahpc (valid till 31-10-2026)
+   Use the Admin panel to generate new client lines. */
+const SALT="numisindia-v1";
+const ADMIN={id:"admin",h:"2a5c3e859905fe97d3e32be1530f41c342fd835b02f4f5f74d1842f955c54a0a"};
+const CLIENTS=[
+ {id:"bahpc",h:"4a18967acf4cc1658cf1c987b4a4ec337f38eeefd27b0de568b2804b28989860",exp:"2026-10-31"},
+];
+/* --------------------------------------------------- */
+const $=id=>document.getElementById(id);
+const sha=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(b=>b.toString(16).padStart(2,'0')).join('');
+let role=null,items=[];
+
+async function login(){
+  const id=$('lid').value.trim().toLowerCase(),pw=$('lpw').value;
+  const h=await sha(SALT+id+":"+pw);
+  let r=null;
+  if(id===ADMIN.id&&h===ADMIN.h)r='admin';
+  else{const c=CLIENTS.find(c=>c.id===id&&c.h===h);
+    if(c){if(c.exp&&new Date(c.exp+'T23:59:59')<new Date()){$('lerr').textContent='This login has expired.';return}r='client'}}
+  if(!r){$('lerr').textContent='Wrong ID or password.';return}
+  try{sessionStorage.setItem('role',r)}catch(e){}
+  enter(r);
+}
+function enter(r){role=r;$('login').classList.add('hide');$('app').classList.remove('hide');
+  $('who').textContent='Signed in as '+(r==='admin'?'Admin':'Client');
+  if(r==='admin')$('admin').classList.remove('hide');}
+$('lgo').onclick=login;$('lpw').onkeydown=e=>{if(e.key==='Enter')login()};
+$('lout').onclick=()=>{try{sessionStorage.removeItem('role')}catch(e){}location.reload()};
+try{const r=sessionStorage.getItem('role');if(r)enter(r)}catch(e){}
+
+$('cgen').onclick=async()=>{
+  const id=$('cid').value.trim().toLowerCase(),pw=$('cpw').value;if(!id||!pw)return;
+  const h=await sha(SALT+id+":"+pw),e=$('cexp').value;
+  $('cout').textContent=`{id:"${id}",h:"${h}"${e?`,exp:"${e}"`:''}},`;$('cout').classList.remove('hide');
+};
+
+/* ---------- images ---------- */
+$('f').onchange=e=>{
+  [...e.target.files].forEach(file=>{
+    const im=new Image();
+    im.onload=()=>addItem(file.name,im);
+    im.src=URL.createObjectURL(file);
+  });
+  e.target.value='';
+};
+function addItem(name,img){
+  const W=img.naturalWidth,H=img.naturalHeight;
+  const it={name,img,W,H,x:Math.round(W/2),y:Math.round(H*.62),r:Math.round(W*.25)};
+  const d=document.createElement('div');d.className='card';
+  d.innerHTML=`<div class="bar"><h2></h2><button class="g">Remove</button></div><canvas></canvas>
+  <label>Center X <b class="vx"></b><input type="range" class="x" min="0" max="${W}"></label>
+  <label>Center Y <b class="vy"></b><input type="range" class="y" min="0" max="${H}"></label>
+  <label>Radius <b class="vr"></b><input type="range" class="r" min="10" max="${Math.floor(Math.min(W,H)/2)}"></label>
+  <button class="dl">Download this coin</button>`;
+  d.querySelector('h2').textContent=name;
+  const cv=d.querySelector('canvas'),g=cv.getContext('2d');
+  const sx=d.querySelector('.x'),sy=d.querySelector('.y'),sr=d.querySelector('.r');
+  sx.value=it.x;sy.value=it.y;sr.value=it.r;
+  const draw=()=>{
+    it.x=+sx.value;it.y=+sy.value;it.r=+sr.value;
+    const s=Math.min(1,(Math.min(innerWidth,640)-60)/W);
+    cv.width=Math.round(W*s);cv.height=Math.round(H*s);
+    g.drawImage(img,0,0,cv.width,cv.height);
+    g.lineWidth=2;g.strokeStyle='#ff2d2d';g.beginPath();g.arc(it.x*s,it.y*s,it.r*s,0,7);g.stroke();
+    d.querySelector('.vx').textContent=it.x;d.querySelector('.vy').textContent=it.y;d.querySelector('.vr').textContent=it.r;
+  };
+  [sx,sy,sr].forEach(s=>s.oninput=draw);draw();
+  d.querySelector('.bar button').onclick=()=>{items=items.filter(i=>i!==it);d.remove();sync()};
+  d.querySelector('.dl').onclick=async()=>save(await blob(crop(it)),base(it.name)+'_coin.png');
+  it.el=d;items.push(it);$('list').appendChild(d);sync();
+}
+const sync=()=>$('acts').classList.toggle('hide',!items.length);
+const base=n=>n.replace(/\.[^.]+$/,'');
+
+/* ---------- lossless crop (1:1 pixels, PNG) ---------- */
+function crop(it){
+  const r=it.r,c=document.createElement('canvas');c.width=c.height=r*2;
+  const g=c.getContext('2d'),bg=$('bg').value;
+  if(bg!=='transparent'){g.fillStyle=bg;g.fillRect(0,0,r*2,r*2)}
+  g.save();g.beginPath();g.arc(r,r,r,0,7);g.clip();
+  g.drawImage(it.img,-(it.x-r),-(it.y-r));g.restore();
+  return c;
+}
+const blob=c=>new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('Image too large for this device')),'image/png'));
+function save(b,name){const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),15000)}
+const say=t=>$('msg').textContent=t;
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+
+$('dsep').onclick=async()=>{
+  try{for(let i=0;i<items.length;i++){say(`Saving ${i+1}/${items.length}...`);save(await blob(crop(items[i])),`${i+1}_${base(items[i].name)}_coin.png`);await wait(600)}say('Done. If only one file saved, allow multiple downloads in Chrome.')}catch(e){say(e.message)}
+};
+
+/* ---------- ZIP (store, no recompression) ---------- */
+function crc32(u){let c=-1;for(let i=0;i<u.length;i++){c^=u[i];for(let k=0;k<8;k++)c=(c>>>1)^(0xEDB88320&-(c&1))}return(c^-1)>>>0}
+function makeZip(files){
+  const enc=new TextEncoder(),parts=[],cen=[];let off=0;
+  for(const f of files){
+    const n=enc.encode(f.name),crc=crc32(f.data),L=new DataView(new ArrayBuffer(30));
+    L.setUint32(0,0x04034b50,true);L.setUint16(4,20,true);L.setUint16(6,0x800,true);L.setUint16(10,0,true);L.setUint16(12,33,true);
+    L.setUint32(14,crc,true);L.setUint32(18,f.data.length,true);L.setUint32(22,f.data.length,true);L.setUint16(26,n.length,true);
+    parts.push(L.buffer,n,f.data);
+    const C=new DataView(new ArrayBuffer(46));
+    C.setUint32(0,0x02014b50,true);C.setUint16(4,20,true);C.setUint16(6,20,true);C.setUint16(8,0x800,true);C.setUint16(14,33,true);
+    C.setUint32(16,crc,true);C.setUint32(20,f.data.length,true);C.setUint32(24,f.data.length,true);C.setUint16(28,n.length,true);C.setUint32(42,off,true);
+    cen.push(C.buffer,n);off+=30+n.length+f.data.length;
+  }
+  let cs=0;cen.forEach(p=>cs+=p.byteLength||p.length);
+  const E=new DataView(new ArrayBuffer(22));
+  E.setUint32(0,0x06054b50,true);E.setUint16(8,files.length,true);E.setUint16(10,files.length,true);E.setUint32(12,cs,true);E.setUint32(16,off,true);
+  return new Blob([...parts,...cen,E.buffer],{type:'application/zip'});
+}
+$('dzip').onclick=async()=>{
+  try{const fs=[];
+    for(let i=0;i<items.length;i++){say(`Preparing ${i+1}/${items.length}...`);
+      fs.push({name:`${i+1}_${base(items[i].name)}_coin.png`,data:new Uint8Array(await(await blob(crop(items[i]))).arrayBuffer())})}
+    save(makeZip(fs),'coins.zip');say('ZIP ready.')}catch(e){say(e.message)}
+};
+
+/* ---------- merge (no resizing, lossless) ---------- */
+$('dmerge').onclick=async()=>{
+  try{
+    const cs=items.map(crop),gap=Math.max(0,+$('gap').value||0),lay=$('lay').value,n=cs.length;
+    const mw=Math.max(...cs.map(c=>c.width)),mh=Math.max(...cs.map(c=>c.height));
+    let W,H,pos=[];
+    if(lay==='row'){let x=gap;cs.forEach(c=>{pos.push([x,gap+(mh-c.height)/2]);x+=c.width+gap});W=x;H=mh+2*gap}
+    else if(lay==='col'){let y=gap;cs.forEach(c=>{pos.push([gap+(mw-c.width)/2,y]);y+=c.height+gap});W=mw+2*gap;H=y}
+    else{const cols=Math.min(2,n),rows=Math.ceil(n/cols);
+      cs.forEach((c,i)=>pos.push([gap+(i%cols)*(mw+gap)+(mw-c.width)/2,gap+Math.floor(i/cols)*(mh+gap)+(mh-c.height)/2]));
+      W=cols*mw+(cols+1)*gap;H=rows*mh+(rows+1)*gap}
+    if(W>16000||H>16000||W*H>150e6){say(`Merged size ${W}×${H}px is too big for a phone. Use the ZIP or fewer coins.`);return}
+    const m=document.createElement('canvas');m.width=W;m.height=H;const g=m.getContext('2d'),bg=$('bg').value;
+    if(bg!=='transparent'){g.fillStyle=bg;g.fillRect(0,0,W,H)}
+    cs.forEach((c,i)=>g.drawImage(c,Math.round(pos[i][0]),Math.round(pos[i][1])));
+    const b=await blob(m);save(b,'merged_coins.png');
+    $('mprev').src=URL.createObjectURL(b);$('mwrap').classList.remove('hide');say(`Merged ${W}×${H}px. Saved (or long-press preview → Download image).`);
+  }catch(e){say(e.message)}
+};
+</script>
+</body>
+</html>
